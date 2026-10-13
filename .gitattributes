@@ -1,0 +1,4 @@
+# Los scripts montados en containers Linux necesitan finales de línea LF.
+# Sin esto, Git en Windows puede guardarlos con CRLF y bash falla con
+# errores raros como "^M: command not found".
+*.sh text eol=lf

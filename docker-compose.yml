@@ -1,0 +1,105 @@
+# =============================================================================
+# POC Activación de Servicios — Infraestructura (Etapa 1: Kafka)
+# =============================================================================
+# Levanta:
+#   kafka       → broker único en modo KRaft (broker + controller, sin ZooKeeper)
+#   kafka-init  → container de un solo uso: crea los topics y termina
+#   kafka-ui    → UI en localhost:8080 para inspeccionar topics y mensajes
+#
+# Uso: docker compose up -d
+# =============================================================================
+
+name: activation-poc
+
+services:
+  # ---------------------------------------------------------------------------
+  # 1. KAFKA (broker único, KRaft)
+  # ---------------------------------------------------------------------------
+  # La imagen apache/kafka funciona por variables de entorno: el prefijo KAFKA_
+  # se convierte en propiedades de server.properties (regla oficial:
+  #   punto → _  ·  guion bajo → __  ·  guion → ___  ·  prefijo KAFKA_
+  # IMPORTANTE: si se configura TODO por env, hay que pasar todas las
+  # propiedades requeridas por KRaft, si no el broker no arranca.
+  # ---------------------------------------------------------------------------
+  kafka:
+    image: apache/kafka:4.3.1        # versión fijada (última estable) — nada de :latest
+    hostname: kafka                  # hostname estable: es como lo van a resolver los demás containers
+    container_name: kafka
+    ports:
+      - "9092:9092"                  # solo el listener EXTERNAL se publica hacia la host
+    environment:
+      # --- KRaft: quién es el controller (ver bloque de listeners abajo) ---
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: "broker,controller"   # un solo nodo que hace las dos tareas
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka:29093"   # "el voto 1 está en kafka:29093"
+      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"     # qué listener es el del protocolo de control
+      CLUSTER_ID: "4L6g3nShT-eMCtK--X86sw"       # id del cluster (el del ejemplo oficial de Kafka)
+
+      # --- Los DOS listeners (el punto más enredado de Kafka en Docker) ---
+      # KAFKA_LISTENERS          = en QUÉ puertos escucha este broker (bind)
+      # KAFKA_ADVERTISED_LISTENERS = qué dirección le devuelve a cada cliente
+      #                            cuando pide metadata ("conectate acá")
+      #   EXTERNAL → localhost:9092  → clientes desde la host (tu consola, tu app local)
+      #   INTERNAL → kafka:19092     → containers entre sí (servicios, kafka-ui, kafka-init)
+      # Si solo hubiera uno, o los containers o la host no podrían conectarse.
+      KAFKA_LISTENERS: "CONTROLLER://:29093,EXTERNAL://:9092,INTERNAL://:19092"
+      KAFKA_ADVERTISED_LISTENERS: "EXTERNAL://localhost:9092,INTERNAL://kafka:19092"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT,INTERNAL:PLAINTEXT"
+      KAFKA_INTER_BROKER_LISTENER_NAME: "INTERNAL"   # los brokers hablan entre sí por este listener
+
+      # --- Réplicas: con 1 broker, todo lo que Kafka replica por default en 3 hay que bajarlo a 1 ---
+      # (si no, topics internos como __consumer_offsets o el transaction state log no arrancarían)
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0       # 0 ms de espera inicial → rebalanceos más rápidos (demo)
+      KAFKA_SHARE_COORDINATOR_STATE_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_SHARE_COORDINATOR_STATE_TOPIC_MIN_ISR: 1
+
+      # --- Política de la casa ---
+      # Los topics se crean a propósito en kafka-init. Si un servicio escribe un
+      # topic que no existe (typo), preferimos que falle ruidosamente a que Kafka
+      # cree un topic "fantasma" de 1 partición que rompe la demo en silencio.
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LOG_DIRS: "/tmp/kraft-combined-logs"      # sin volume: `docker compose down` = estado limpio para la demo
+    healthcheck:
+      # No es un ping: kafka-broker-api-versions.sh habla el protocolo real de Kafka
+      # contra el listener EXTERNAL (que en la host del container escucha en :9092).
+      # Ruta absoluta: /opt/kafka/bin NO está en el $PATH de la imagen.
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092"]
+      interval: 5s
+      timeout: 10s
+      retries: 12
+      start_period: 20s                # Kafka tarda ~10-15 s en formar el quórum; le damos margen
+
+  # ---------------------------------------------------------------------------
+  # 2. KAFKA-INIT (crea los topics, una sola vez)
+  # ---------------------------------------------------------------------------
+  # Usa la MISMA imagen de Kafka (trae kafka-topics.sh) pero no corre el broker:
+  # entra, crea los topics y termina. Es el patrón "job" de Compose.
+  kafka-init:
+    image: apache/kafka:4.3.1
+    depends_on:
+      kafka:
+        condition: service_healthy    # ← la mitigación del riesgo #1 del doc:
+                                      #   no arranca hasta que el broker responde de verdad
+    volumes:
+      - ./docker/create-topics.sh:/create-topics.sh:ro   # montado solo lectura
+    entrypoint: ["/bin/bash", "/create-topics.sh"]
+    restart: "no"                     # es un job: termina y no vuelve a correr
+
+  # ---------------------------------------------------------------------------
+  # 3. KAFKA UI (inspección visual — la "pantalla derecha" de la demo)
+  # ---------------------------------------------------------------------------
+  kafka-ui:
+    image: kafbat/kafka-ui:v1.5.0     # versión fijada
+    container_name: kafka-ui
+    ports:
+      - "8080:8080"
+    environment:
+      # La UI es otro cliente más: se conecta por el listener INTERNAL (kafka:19092)
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:19092
+    depends_on:
+      kafka:
+        condition: service_healthy
