@@ -5,6 +5,8 @@
 #   kafka       → broker único en modo KRaft (broker + controller, sin ZooKeeper)
 #   kafka-init  → container de un solo uso: crea los topics y termina
 #   kafka-ui    → UI en localhost:8080 para inspeccionar topics y mensajes
+#   mongo       → base de datos en replica set de 1 nodo (una base por servicio)
+#   mongo-init  → job que inicializa el replica set y espera a que haya PRIMARY
 #
 # Uso: docker compose up -d
 # =============================================================================
@@ -103,3 +105,46 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
+
+  # ---------------------------------------------------------------------------
+  # 4. MONGO (base de datos en replica set de 1 nodo)
+  # ---------------------------------------------------------------------------
+  # ¿Por qué un replica set si hay un solo nodo? Porque Mongo NO permite
+  # transacciones multi-documento en modo standalone, y la POC las necesita
+  # para el outbox y la idempotencia (sección 09 del documento). Un replica
+  # set de 1 nodo es el mínimo para desbloquearlas: NO es alta disponibilidad.
+  # ---------------------------------------------------------------------------
+  mongo:
+    image: mongo:8.0.32              # versión fijada (serie 8.0 consolidada)
+    container_name: mongo
+    ports:
+      - "27017:27017"
+    # --replSet rs0: arranca como miembro del replica set "rs0", pero SIN
+    # inicializarlo todavía: eso lo hace mongo-init con rs.initiate()
+    # --bind_ip_all: escucha en todas las interfaces del container
+    #   (por defecto solo escucha en 127.0.0.1 y nadie podría conectarse)
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    healthcheck:
+      # "¿responde?" — ojo: esto NO garantiza que haya un PRIMARY electo,
+      # solo que el proceso escucha. Quien necesite un primario debe esperar
+      # a que termine el job mongo-init (condition: service_completed_successfully)
+      test: ["CMD-SHELL", "mongosh --quiet --eval \"quit(db.adminCommand('ping').ok ? 0 : 1)\""]
+      interval: 5s
+      timeout: 10s
+      retries: 12
+      start_period: 15s
+
+  # ---------------------------------------------------------------------------
+  # 5. MONGO-INIT (inicializa el replica set, una sola vez)
+  # ---------------------------------------------------------------------------
+  # Patrón "job": entra, hace rs.initiate(), espera a que el nodo se elija
+  # PRIMARY y termina. Idempotente: si ya está inicializado, no hace nada.
+  mongo-init:
+    image: mongo:8.0.32
+    depends_on:
+      mongo:
+        condition: service_healthy
+    volumes:
+      - ./docker/mongo-init.js:/mongo-init.js:ro   # montado solo lectura
+    entrypoint: ["mongosh", "--host", "mongo", "--file", "/mongo-init.js"]
+    restart: "no"                     # es un job: termina y no vuelve a correr
