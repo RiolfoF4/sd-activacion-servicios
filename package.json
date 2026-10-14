@@ -1,0 +1,13 @@
+{
+  "name": "sd-activacion-servicios",
+  "version": "1.0.0",
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": "12.11.2",
+      "onFail": "download"
+    }
+  },
+  "packageManager": "pnpm@12.11.2",
+  "private": true
+}
