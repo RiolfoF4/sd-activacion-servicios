@@ -2,7 +2,6 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ActivationsModule } from './activations/activations.module';
-import { KafkaModule } from './activations/kafka/kafka.module';
 
 @Module({
   imports: [

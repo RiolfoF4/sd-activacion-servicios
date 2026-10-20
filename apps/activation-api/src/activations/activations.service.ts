@@ -5,16 +5,38 @@ import { Activation, ActivationDocument } from './activations.schema';
 import { CreateActivationDto } from './dto/create-activation.dto';
 import { randomUUID } from 'crypto';
 import { ClientKafka } from '@nestjs/microservices';
-import { TOPICS } from '@poc/contracts';
+import { ActivationRequestedPayload, TOPICS } from '@poc/contracts';
+import { KAFKA_CLIENT } from './kafka/kafka.module';
+import { createEnvelope } from '@poc/contracts';
 
 @Injectable()
 export class ActivationsService {
   constructor(
     @InjectModel(Activation.name) private activationModel: Model<Activation>,
 
-    @Inject('ACTIVATION_API') // Hardcodeado, que le va ser
+    @Inject(KAFKA_CLIENT)
     private readonly client: ClientKafka,
   ) {}
+
+  private publishActivationRequested(activation: ActivationDocument) {
+    const envelope = createEnvelope<ActivationRequestedPayload>({
+      correlationId: activation._id,
+      customerId: activation.customerId,
+      eventType: 'ActivationRequested',
+      source: 'activation-api',
+      version: 1,
+      payload: {
+        channel: 'web',
+        planId: activation.planId,
+        simulateFailure: activation.simulateFailure,
+      },
+    });
+
+    this.client.emit(TOPICS.activationRequested, {
+      key: envelope.customerId,
+      value: envelope,
+    });
+  }
 
   private newActivationId(): string {
     const len = 6;
@@ -32,9 +54,11 @@ export class ActivationsService {
       simulateFailure,
     });
 
-    this.client.emit(TOPICS.activationRequested, createdActivation);
+    const savedActivation = await createdActivation.save();
 
-    return createdActivation.save();
+    this.publishActivationRequested(savedActivation);
+
+    return savedActivation;
   }
 
   async findById(id: string): Promise<ActivationDocument | null> {
