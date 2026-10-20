@@ -5,9 +5,12 @@ import { Activation, ActivationDocument } from './activations.schema';
 import { CreateActivationDto } from './dto/create-activation.dto';
 import { randomUUID } from 'crypto';
 import { ClientKafka } from '@nestjs/microservices';
-import { ActivationRequestedPayload, TOPICS } from '@poc/contracts';
+import {
+  ActivationRequestedPayload,
+  TOPICS,
+  createEnvelope,
+} from '@poc/contracts';
 import { KAFKA_CLIENT } from './kafka/kafka.module';
-import { createEnvelope } from '@poc/contracts';
 
 @Injectable()
 export class ActivationsService {
