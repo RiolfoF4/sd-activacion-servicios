@@ -2,7 +2,6 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
 import { BillingModule } from './billing/billing.module';
-import { KafkaProducerModule } from './kafka/kafka-producer.module';
 
 @Module({
   imports: [
@@ -13,7 +12,6 @@ import { KafkaProducerModule } from './kafka/kafka-producer.module';
         uri: config.getOrThrow<string>('MONGO_URI'),
       }),
     }),
-    KafkaProducerModule,
     BillingModule,
   ],
 })
