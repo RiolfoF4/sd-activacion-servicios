@@ -23,6 +23,8 @@ export class BillingConsumer {
     @Payload() envelope: Envelope<ActivationRequestedPayload>,
     @Ctx() rawContext: unknown,
   ): Promise<void> {
+    // Nest 12 tipa @EventPattern y exige que los parámetros extra del handler
+    // sean "unknown"; el contexto real sigue siendo un KafkaContext.
     const context = rawContext as KafkaContext;
     const message = context.getMessage();
     const key = message.key?.toString() ?? 'sin key';
