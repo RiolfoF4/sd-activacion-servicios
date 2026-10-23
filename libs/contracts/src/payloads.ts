@@ -22,6 +22,15 @@ export type ProvisioningFailedPayload = {
   reason: string;
 };
 
+export type ActivationCompletedPayload = {
+  planId: string;
+};
+
+export type ActivationFailedPayload = {
+  failedService: "billing" | "provisioning";
+  reason: string;
+};
+
 export const SIMULATE_FAILURE = ["billing", "provisioning", "none"] as const;
 
 export type SimulateFailure = (typeof SIMULATE_FAILURE)[number];
