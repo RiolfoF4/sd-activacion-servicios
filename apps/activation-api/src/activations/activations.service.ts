@@ -1,16 +1,31 @@
-import { Model } from 'mongoose';
+import { randomUUID } from 'crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Activation, ActivationDocument } from './activations.schema';
-import { CreateActivationDto } from './dto/create-activation.dto';
-import { randomUUID } from 'crypto';
 import { ClientKafka } from '@nestjs/microservices';
+import type { Model } from 'mongoose';
 import {
-  ActivationRequestedPayload,
   TOPICS,
   createEnvelope,
+  type ActivationCompletedPayload,
+  type ActivationFailedPayload,
+  type ActivationRequestedPayload,
+  type BillingAccountCreatedPayload,
+  type BillingFailedPayload,
+  type Envelope,
+  type ProvisioningCompletedPayload,
+  type ProvisioningFailedPayload,
 } from '@poc/contracts';
+import { Activation, ActivationDocument } from './activations.schema';
+import { CreateActivationDto } from './dto/create-activation.dto';
 import { KAFKA_CLIENT } from './kafka/kafka-producer.module';
+
+type BillingResultPayload = BillingAccountCreatedPayload | BillingFailedPayload;
+type ProvisioningResultPayload =
+  | ProvisioningCompletedPayload
+  | ProvisioningFailedPayload;
+type ActivationResultPayload =
+  | ActivationCompletedPayload
+  | ActivationFailedPayload;
 
 @Injectable()
 export class ActivationsService {
@@ -21,50 +36,217 @@ export class ActivationsService {
     private readonly client: ClientKafka,
   ) {}
 
-  private publishActivationRequested(activation: ActivationDocument) {
-    const envelope = createEnvelope<ActivationRequestedPayload>({
-      correlationId: activation._id,
-      customerId: activation.customerId,
-      eventType: 'ActivationRequested',
-      source: 'activation-api',
-      version: 1,
-      payload: {
-        channel: 'web',
-        planId: activation.planId,
-        simulateFailure: activation.simulateFailure,
-      },
-    });
-
-    this.client.emit(TOPICS.activationRequested, {
-      key: envelope.customerId,
-      value: envelope,
-    });
-  }
-
   private newActivationId(): string {
     const len = 6;
     return `act-${randomUUID().replace(/-/g, '').slice(0, len)}`;
+  }
+
+  private publish<T>(topic: string, envelope: Envelope<T>): void {
+    this.client.emit(topic, {
+      key: envelope.customerId,
+      value: envelope,
+    });
   }
 
   async create(
     createActivationDto: CreateActivationDto,
   ): Promise<ActivationDocument> {
     const { customerId, planId, simulateFailure } = createActivationDto;
+    const activationId = this.newActivationId();
+
+    const requestedEvent = createEnvelope<ActivationRequestedPayload>({
+      correlationId: activationId,
+      customerId,
+      eventType: 'ActivationRequested',
+      source: 'activation-api',
+      payload: {
+        channel: 'web',
+        planId,
+        simulateFailure: simulateFailure ?? 'none',
+      },
+    });
+
     const createdActivation = new this.activationModel({
-      _id: this.newActivationId(),
+      _id: activationId,
       customerId,
       planId,
       simulateFailure,
+      history: [
+        {
+          eventType: requestedEvent.eventType,
+          at: new Date(requestedEvent.occurredAt),
+        },
+      ],
     });
 
     const savedActivation = await createdActivation.save();
 
-    this.publishActivationRequested(savedActivation);
+    this.publish(TOPICS.activationRequested, requestedEvent);
 
     return savedActivation;
   }
 
+  async handleBillingResult(
+    envelope: Envelope<BillingResultPayload>,
+  ): Promise<void> {
+    if (envelope.eventType === 'BillingFailed') {
+      const { reason } = envelope.payload as BillingFailedPayload;
+      await this.registerStepResult('billing', envelope, 'FAILED', reason);
+      return;
+    }
+
+    if (envelope.eventType === 'BillingAccountCreated') {
+      await this.registerStepResult('billing', envelope, 'OK');
+    }
+  }
+
+  async handleProvisioningResult(
+    envelope: Envelope<ProvisioningResultPayload>,
+  ): Promise<void> {
+    if (envelope.eventType === 'ProvisioningFailed') {
+      const { reason } = envelope.payload as ProvisioningFailedPayload;
+      await this.registerStepResult('provisioning', envelope, 'FAILED', reason);
+      return;
+    }
+
+    if (envelope.eventType === 'ProvisioningCompleted') {
+      await this.registerStepResult('provisioning', envelope, 'OK');
+    }
+  }
+
   async findById(id: string): Promise<ActivationDocument | null> {
     return this.activationModel.findById(id).exec();
+  }
+
+  private async registerStepResult(
+    service: 'billing' | 'provisioning',
+    envelope: Envelope<unknown>,
+    status: 'OK' | 'FAILED',
+    failureReason?: string,
+  ): Promise<void> {
+    const at = new Date();
+    const updatedActivation = await this.activationModel.findOneAndUpdate(
+      {
+        _id: envelope.correlationId,
+        status: { $in: ['PENDING', 'IN_PROGRESS'] },
+      },
+      {
+        $set: {
+          [`steps.${service}`]: { status, at },
+          status: 'IN_PROGRESS',
+        },
+        $push: {
+          history: {
+            eventType: envelope.eventType,
+            at,
+          },
+        },
+      },
+      { new: true },
+    );
+
+    if (!updatedActivation) {
+      await this.recordIgnoredResult(envelope);
+      return;
+    }
+
+    if (status === 'FAILED') {
+      await this.failActivation(
+        updatedActivation._id,
+        service,
+        failureReason ?? 'unknown',
+      );
+      return;
+    }
+
+    await this.completeActivationIfReady(updatedActivation._id);
+  }
+
+  private async recordIgnoredResult(
+    envelope: Envelope<unknown>,
+  ): Promise<void> {
+    await this.activationModel.updateOne(
+      { _id: envelope.correlationId },
+      {
+        $push: {
+          history: {
+            eventType: envelope.eventType,
+            at: new Date(),
+          },
+        },
+      },
+    );
+  }
+
+  private async completeActivationIfReady(activationId: string): Promise<void> {
+    const at = new Date();
+    const completedActivation = await this.activationModel.findOneAndUpdate(
+      {
+        _id: activationId,
+        status: 'IN_PROGRESS',
+        'steps.billing.status': 'OK',
+        'steps.provisioning.status': 'OK',
+      },
+      {
+        $set: { status: 'ACTIVE' },
+        $push: {
+          history: {
+            eventType: 'ActivationCompleted',
+            at,
+          },
+        },
+      },
+      { new: true },
+    );
+
+    if (!completedActivation) return;
+
+    this.publishActivationResult(completedActivation, 'ActivationCompleted', {
+      planId: completedActivation.planId,
+    });
+  }
+
+  private async failActivation(
+    activationId: string,
+    failedService: 'billing' | 'provisioning',
+    reason: string,
+  ): Promise<void> {
+    const at = new Date();
+    const failedActivation = await this.activationModel.findOneAndUpdate(
+      { _id: activationId, status: 'IN_PROGRESS' },
+      {
+        $set: { status: 'FAILED' },
+        $push: {
+          history: {
+            eventType: 'ActivationFailed',
+            at,
+          },
+        },
+      },
+      { new: true },
+    );
+
+    if (!failedActivation) return;
+
+    this.publishActivationResult(failedActivation, 'ActivationFailed', {
+      failedService,
+      reason,
+    });
+  }
+
+  private publishActivationResult(
+    activation: ActivationDocument,
+    eventType: 'ActivationCompleted' | 'ActivationFailed',
+    payload: ActivationResultPayload,
+  ): void {
+    const envelope = createEnvelope<ActivationResultPayload>({
+      correlationId: activation._id,
+      customerId: activation.customerId,
+      eventType,
+      source: 'activation-api',
+      payload,
+    });
+
+    this.publish(TOPICS.activationEvents, envelope);
   }
 }

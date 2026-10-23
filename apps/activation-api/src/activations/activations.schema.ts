@@ -21,6 +21,17 @@ class StepResult {
 export const StepResultSchema = SchemaFactory.createForClass(StepResult);
 
 @Schema({ _id: false })
+class ActivationSteps {
+  @Prop({ type: StepResultSchema })
+  billing?: StepResult;
+
+  @Prop({ type: StepResultSchema })
+  provisioning?: StepResult;
+}
+export const ActivationStepsSchema =
+  SchemaFactory.createForClass(ActivationSteps);
+
+@Schema({ _id: false })
 class HistoryEntry {
   @Prop({ type: String })
   eventType: EventType;
@@ -41,8 +52,8 @@ export class Activation {
   status: ActivationStatus;
   @Prop({ type: String, enum: [...SIMULATE_FAILURE], default: 'none' })
   simulateFailure: SimulateFailure;
-  @Prop({ type: [StepResultSchema], default: [] })
-  steps: StepResult[];
+  @Prop({ type: ActivationStepsSchema, default: {} })
+  steps: ActivationSteps;
   @Prop({ type: [HistoryEntrySchema], default: [] })
   history: HistoryEntry[];
 }
