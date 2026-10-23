@@ -30,7 +30,7 @@ export class ProvisioningConsumer {
     const key = message.key?.toString() ?? 'sin key';
 
     this.logger.log(
-      `ActivationRequested recibido (activación=${envelope.correlationId}, key=${key}, partition=${context.getPartition()}, offset=${message.offset})`,
+      `${envelope.eventType} recibido (activación=${envelope.correlationId}, eventId=${envelope.eventId}, key=${key}, partition=${context.getPartition()}, offset=${message.offset})`,
     );
 
     await this.provisioningService.handleActivationRequested(envelope);

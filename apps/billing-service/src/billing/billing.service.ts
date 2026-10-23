@@ -106,7 +106,7 @@ export class BillingService {
     });
 
     this.logger.log(
-      `${envelope.eventType} publicado en ${TOPICS.billingEvents} (eventId=${envelope.eventId})`,
+      `${envelope.eventType} publicado en ${TOPICS.billingEvents} (activación=${envelope.correlationId}, eventId=${envelope.eventId}, key=${envelope.customerId})`,
     );
   }
 }

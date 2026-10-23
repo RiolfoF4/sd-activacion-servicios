@@ -119,7 +119,7 @@ export class ProvisioningService {
     });
 
     this.logger.log(
-      `${envelope.eventType} publicado en ${TOPICS.provisioningEvents} (eventId=${envelope.eventId})`,
+      `${envelope.eventType} publicado en ${TOPICS.provisioningEvents} (activación=${envelope.correlationId}, eventId=${envelope.eventId}, key=${envelope.customerId})`,
     );
   }
 }

@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { ClientKafka } from '@nestjs/microservices';
 import type { Model } from 'mongoose';
@@ -29,6 +29,8 @@ type ActivationResultPayload =
 
 @Injectable()
 export class ActivationsService {
+  private readonly logger = new Logger(ActivationsService.name);
+
   constructor(
     @InjectModel(Activation.name) private activationModel: Model<Activation>,
 
@@ -46,6 +48,10 @@ export class ActivationsService {
       key: envelope.customerId,
       value: envelope,
     });
+
+    this.logger.log(
+      `${envelope.eventType} publicado en ${topic} (activación=${envelope.correlationId}, eventId=${envelope.eventId}, key=${envelope.customerId})`,
+    );
   }
 
   async create(
@@ -81,6 +87,10 @@ export class ActivationsService {
 
     const savedActivation = await createdActivation.save();
 
+    this.logger.log(
+      `Activación ${savedActivation._id} creada (cliente=${customerId}, plan=${planId}, fallo=${savedActivation.simulateFailure})`,
+    );
+
     this.publish(TOPICS.activationRequested, requestedEvent);
 
     return savedActivation;
@@ -97,7 +107,12 @@ export class ActivationsService {
 
     if (envelope.eventType === 'BillingAccountCreated') {
       await this.registerStepResult('billing', envelope, 'OK');
+      return;
     }
+
+    this.logger.warn(
+      `Evento de billing ignorado (activación=${envelope.correlationId}, eventType=${envelope.eventType})`,
+    );
   }
 
   async handleProvisioningResult(
@@ -111,7 +126,12 @@ export class ActivationsService {
 
     if (envelope.eventType === 'ProvisioningCompleted') {
       await this.registerStepResult('provisioning', envelope, 'OK');
+      return;
     }
+
+    this.logger.warn(
+      `Evento de provisioning ignorado (activación=${envelope.correlationId}, eventType=${envelope.eventType})`,
+    );
   }
 
   async findById(id: string): Promise<ActivationDocument | null> {
@@ -150,6 +170,10 @@ export class ActivationsService {
       return;
     }
 
+    this.logger.log(
+      `Resultado de ${service} registrado: ${status} (activación=${envelope.correlationId}, eventType=${envelope.eventType})`,
+    );
+
     if (status === 'FAILED') {
       await this.failActivation(
         updatedActivation._id,
@@ -165,7 +189,7 @@ export class ActivationsService {
   private async recordIgnoredResult(
     envelope: Envelope<unknown>,
   ): Promise<void> {
-    await this.activationModel.updateOne(
+    const result = await this.activationModel.updateOne(
       { _id: envelope.correlationId },
       {
         $push: {
@@ -175,6 +199,17 @@ export class ActivationsService {
           },
         },
       },
+    );
+
+    if (result.matchedCount === 0) {
+      this.logger.warn(
+        `Evento ${envelope.eventType} ignorado: no existe la activación ${envelope.correlationId}`,
+      );
+      return;
+    }
+
+    this.logger.log(
+      `Evento ${envelope.eventType} registrado solo en el historial (activación=${envelope.correlationId}, estado final)`,
     );
   }
 
@@ -200,6 +235,10 @@ export class ActivationsService {
     );
 
     if (!completedActivation) return;
+
+    this.logger.log(
+      `Activación ${completedActivation._id} -> ACTIVE (billing y provisioning OK)`,
+    );
 
     this.publishActivationResult(completedActivation, 'ActivationCompleted', {
       planId: completedActivation.planId,
@@ -227,6 +266,10 @@ export class ActivationsService {
     );
 
     if (!failedActivation) return;
+
+    this.logger.warn(
+      `Activación ${failedActivation._id} -> FAILED (falló ${failedService}: ${reason})`,
+    );
 
     this.publishActivationResult(failedActivation, 'ActivationFailed', {
       failedService,
