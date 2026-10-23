@@ -162,7 +162,7 @@ export class ActivationsService {
           },
         },
       },
-      { new: true },
+      { returnDocument: 'after' },
     );
 
     if (!updatedActivation) {
@@ -231,7 +231,7 @@ export class ActivationsService {
           },
         },
       },
-      { new: true },
+      { returnDocument: 'after' },
     );
 
     if (!completedActivation) return;
@@ -262,7 +262,7 @@ export class ActivationsService {
           },
         },
       },
-      { new: true },
+      { returnDocument: 'after' },
     );
 
     if (!failedActivation) return;
