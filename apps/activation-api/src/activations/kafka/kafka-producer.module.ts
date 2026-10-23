@@ -26,4 +26,4 @@ export const KAFKA_CLIENT = 'ACTIVATION_API';
   ],
   exports: [ClientsModule],
 })
-export class KafkaModule {}
+export class KafkaProducerModule {}

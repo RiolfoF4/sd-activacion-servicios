@@ -10,7 +10,7 @@ import {
   TOPICS,
   createEnvelope,
 } from '@poc/contracts';
-import { KAFKA_CLIENT } from './kafka/kafka.module';
+import { KAFKA_CLIENT } from './kafka/kafka-producer.module';
 
 @Injectable()
 export class ActivationsService {
