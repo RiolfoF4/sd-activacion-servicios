@@ -1,0 +1,24 @@
+# Dependencias y artefactos generados en la host.
+# NUNCA copiar node_modules de Windows a una imagen Linux.
+node_modules
+**/node_modules
+dist
+**/dist
+**/*.tsbuildinfo
+**/coverage
+
+# Configuración local: el compose inyecta las variables de cada container.
+**/.env
+**/.env.*
+**/*.log
+
+# Repositorio y herramientas locales.
+.git
+.gitignore
+.vscode
+
+# Documentación y archivos que no hacen falta dentro de la imagen.
+docs
+docker
+*.pdf
+docker-compose*.yml

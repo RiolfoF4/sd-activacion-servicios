@@ -1,14 +1,17 @@
 # =============================================================================
-# POC Activación de Servicios — Infraestructura (Etapa 1: Kafka)
+# POC Activación de Servicios — Fase 1 (Infraestructura + servicios NestJS)
 # =============================================================================
 # Levanta:
-#   kafka       → broker único en modo KRaft (broker + controller, sin ZooKeeper)
-#   kafka-init  → container de un solo uso: crea los topics y termina
-#   kafka-ui    → UI en localhost:8080 para inspeccionar topics y mensajes
-#   mongo       → base de datos en replica set de 1 nodo (una base por servicio)
-#   mongo-init  → job que inicializa el replica set y espera a que haya PRIMARY
+#   kafka                → broker único en modo KRaft (broker + controller)
+#   kafka-init           → container de un solo uso: crea los topics y termina
+#   kafka-ui             → UI en localhost:8080 para inspeccionar topics
+#   mongo                → replica set de 1 nodo (una base por servicio)
+#   mongo-init           → job que inicializa el replica set hasta tener PRIMARY
+#   activation-api       → REST + agregador de la saga (puerto 3000)
+#   billing-service      → consume ActivationRequested y crea la cuenta
+#   provisioning-service → consume ActivationRequested y aprovisiona la línea
 #
-# Uso: docker compose up -d
+# Uso: docker compose up -d --build
 # =============================================================================
 
 name: activation-poc
@@ -103,8 +106,8 @@ services:
       KAFKA_CLUSTERS_0_NAME: local
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:19092
     depends_on:
-      kafka:
-        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
 
   # ---------------------------------------------------------------------------
   # 4. MONGO (base de datos en replica set de 1 nodo)
@@ -148,3 +151,86 @@ services:
       - ./docker/mongo-init.js:/mongo-init.js:ro   # montado solo lectura
     entrypoint: ["mongosh", "--host", "mongo", "--file", "/mongo-init.js"]
     restart: "no"                     # es un job: termina y no vuelve a correr
+
+  # ---------------------------------------------------------------------------
+  # 6. SERVICIOS NESTJS (Fase 1)
+  # ---------------------------------------------------------------------------
+  # Los tres se construyen con el mismo Dockerfile y se diferencian por APP.
+  # No tienen container_name a propósito: así el escenario 4 de Fase 3 puede
+  # hacer `docker compose up -d --scale billing-service=2`.
+  #
+  # Todos esperan a que los jobs de inicialización terminen bien:
+  #   kafka-init → topics creados
+  #   mongo-init → replica set con PRIMARY (necesario para transacciones)
+  # ---------------------------------------------------------------------------
+  activation-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP: activation-api
+    environment:
+      KAFKA_BROKERS: kafka:19092          # listener INTERNAL, no localhost
+      KAFKA_CLIENT_ID: activation-api
+      KAFKA_GROUP_ID: activation-api
+      MONGO_URI: "mongodb://mongo:27017/activation_api?replicaSet=rs0&directConnection=true"
+      PORT: 3000
+    ports:
+      - "3000:3000"                       # único servicio con HTTP expuesto
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      mongo:
+        condition: service_healthy
+      mongo-init:
+        condition: service_completed_successfully
+    init: true                            # PID 1 liviano: reenvía señales a Node
+    restart: unless-stopped
+
+  billing-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP: billing-service
+    environment:
+      KAFKA_BROKERS: kafka:19092
+      KAFKA_CLIENT_ID: billing-svc
+      KAFKA_GROUP_ID: billing-svc
+      MONGO_URI: "mongodb://mongo:27017/billing?replicaSet=rs0&directConnection=true"
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      mongo:
+        condition: service_healthy
+      mongo-init:
+        condition: service_completed_successfully
+    init: true
+    restart: unless-stopped
+
+  provisioning-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP: provisioning-service
+    environment:
+      KAFKA_BROKERS: kafka:19092
+      KAFKA_CLIENT_ID: provisioning-svc
+      KAFKA_GROUP_ID: provisioning-svc
+      MONGO_URI: "mongodb://mongo:27017/provisioning?replicaSet=rs0&directConnection=true"
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      mongo:
+        condition: service_healthy
+      mongo-init:
+        condition: service_completed_successfully
+    init: true
+    restart: unless-stopped
