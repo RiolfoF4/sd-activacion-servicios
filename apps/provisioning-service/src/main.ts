@@ -19,6 +19,9 @@ async function bootstrap() {
       consumer: {
         groupId: config.getOrThrow<string>('KAFKA_GROUP_ID'),
       },
+      // Un consumer group nuevo arranca desde el inicio del topic. Evita perder
+      // el primer evento si se publica antes de que el grupo termine de unirse.
+      subscribe: { fromBeginning: true },
       postfixId: '', // Evita que Nest agregue "-server"
     },
   });
