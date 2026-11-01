@@ -9,5 +9,8 @@
     }
   },
   "packageManager": "pnpm@12.11.2",
-  "private": true
+  "private": true,
+  "scripts": {
+    "smoke": "node scripts/smoke-test.mjs"
+  }
 }
