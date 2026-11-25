@@ -1,9 +1,9 @@
 # Phase 2 Plan — Visible
 
-**Status:** in progress — increment 1 verified (2026-11-25)
+**Status:** in progress — increment 2 verified (2026-11-25)
 **Current phase:** 2
-**Next increment:** 2 — Compensation
-**Baseline:** Phase 1 verified; increment 1 verified.
+**Next increment:** 3 — WebSocket
+**Baseline:** Phase 1 verified; increments 1 and 2 verified.
 
 ## Scope
 
@@ -40,7 +40,8 @@ No new Kafka topics are needed. `activation.requested`, `billing.events`, `provi
 |---|---|---|
 | Increment order | Backend first: notification → compensation → WebSocket → UI → packaging | The UI is built once, with the final event set. |
 | Notifications | Separate `notification-service` + Mailpit | Same consumer pattern as billing/provisioning; Mailpit is a maintained drop-in for the spec's Mailhog inbox. |
-| Compensation | Billing consumes `activation.events` and keeps a cancellation marker per `activationId` | Covers the race where `ActivationFailed` arrives before billing creates the account. |
+| Compensation | Billing consumes `activation.events` and keeps a `CANCELLED` tombstone in `billing_accounts` per `activationId` | Covers the race where `ActivationFailed` arrives before billing creates the account; the existing upsert ignores a late `ActivationRequested`. |
+| Cancellation payload | `BillingAccountCancelledPayload = { billingAccountId, planId, reason }` | Self-contained event for the timeline, logs and future CRM consumers. |
 | WebSocket payload | Full activation snapshot, broadcast to all clients | Simple and robust; the UI filters by `activationId` and can always fall back to `GET`. |
 | UI to API | Direct call to `:3000` with CORS, no nginx proxy | Fewer moving parts; CORS is also needed for local Vite development. |
 | Simulated inbox | Mailpit instead of Mailhog | Mailhog is unmaintained; Mailpit keeps the same ports and SMTP behavior, and its API is used by the smoke test. |
@@ -79,7 +80,7 @@ No new Kafka topics are needed. `activation.requested`, `billing.events`, `provi
 
 **Known limitation:** the notification document is inserted before sending. If SMTP fails, the document stays `FAILED` and is not retried until Phase 3.
 
-### 2. Compensation — next
+### 2. Compensation — done
 
 **Objective:** a failure never leaves an orphan billing account.
 
@@ -158,10 +159,12 @@ No new Kafka topics are needed. `activation.requested`, `billing.events`, `provi
 
 ## Handoff
 
-- Repo state: Phase 1 plus Phase 2 increment 1. `notification-service` consumes `activation.events` with group `notification-svc`, stores one document per `{ activationId, eventType }` in `notification.notifications` (unique compound index), and sends the email with `nodemailer` to Mailpit. `ActivationFailedPayload` now includes `planId`.
+- Repo state: Phase 1 plus Phase 2 increments 1 and 2. `notification-service` consumes `activation.events` with group `notification-svc`, stores one document per `{ activationId, eventType }` in `notification.notifications` (unique compound index), and sends the email with `nodemailer` to Mailpit. `ActivationFailedPayload` includes `planId`.
+- Compensation: `billing-service` also consumes `activation.events` with group `billing-svc`. On `ActivationFailed` it cancels a `CREATED` account with a status-guarded update, publishes `BillingAccountCancelled` (`{ billingAccountId, planId, reason }`) to `billing.events`, or stores a `CANCELLED` tombstone in `billing.billing_accounts` when the account does not exist yet. The existing `updateOne(... upsert)` in `handleActivationRequested` ignores a late request when the tombstone exists. `activation-api` records `BillingAccountCancelled` only in the activation history; `steps` and `status` do not change.
 - Increment 1 verification (2026-11-25): happy path reached `ACTIVE` with the welcome email and document `SENT`; `simulateFailure=provisioning` reached `FAILED` with the error email (`planId`, `failedService`, `reason`); deleting the consumer-group offsets replayed both events without new emails; `pnpm smoke` stayed green.
-- Known limitation: the notification document is inserted before sending, so an SMTP failure leaves it `FAILED` without retry until Phase 3.
-- Next session: increment 2 (compensation). Read `AGENTS.md` and the increment 2 section first; update this Status/Handoff and `AGENTS.md` when it lands.
+- Increment 2 verification (2026-11-25): `pnpm smoke` stayed green. `simulateFailure=provisioning` ended `FAILED` with history `ProvisioningFailed` -> `ActivationFailed` -> `BillingAccountCancelled`, billing account `CANCELLED` in Mongo, error email in Mailpit, and billing logs showing the cancellation. A synthetic `ActivationFailed` published before a late `ActivationRequested` created only the `CANCELLED` tombstone; the late request was ignored and no `BillingAccountCreated` was published. A repeated `ActivationFailed` did not publish a second `BillingAccountCancelled`.
+- Known limitations: no `processed_events`, retries or DLQ (Phase 3); a redelivered `BillingAccountCancelled` could append a duplicate history entry; if publishing the cancellation fails after the account is marked `CANCELLED`, there is no retry; cross-topic ordering can still produce a `BillingAccountCreated` after a cancellation in a rare race, but the account ends `CANCELLED`; the notification document is inserted before sending, so an SMTP failure leaves it `FAILED` without retry until Phase 3.
+- Next session: increment 3 (WebSocket). Read `AGENTS.md` and the increment 3 section first; update this Status/Handoff and `AGENTS.md` when it lands.
 - Baseline commands: `docker compose up -d --build` and `pnpm smoke`.
 
 ## References
