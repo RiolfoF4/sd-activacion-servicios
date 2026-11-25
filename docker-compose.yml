@@ -9,7 +9,7 @@
 #   mongo-init           → job que inicializa el replica set hasta tener PRIMARY
 #   mailpit              → bandeja de correo simulada (SMTP 1025, UI 8025)
 #   activation-api       → REST + agregador de la saga (puerto 3000)
-#   billing-service      → consume ActivationRequested y crea la cuenta
+#   billing-service      → consume ActivationRequested y activation.events; crea y cancela la cuenta
 #   provisioning-service → consume ActivationRequested y aprovisiona la línea
 #   notification-service → consume activation.events y manda el email
 #

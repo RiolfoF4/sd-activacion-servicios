@@ -13,6 +13,12 @@ export type BillingFailedPayload = {
   reason: string;
 };
 
+export type BillingAccountCancelledPayload = {
+  billingAccountId: string;
+  planId: string;
+  reason: string;
+};
+
 export type ProvisioningCompletedPayload = {
   provisioningOrderId: string;
   planId: string;

@@ -7,6 +7,7 @@ import {
 } from '@nestjs/microservices';
 import {
   TOPICS,
+  type BillingAccountCancelledPayload,
   type BillingAccountCreatedPayload,
   type BillingFailedPayload,
   type Envelope,
@@ -15,7 +16,10 @@ import {
 } from '@poc/contracts';
 import { ActivationsService } from './activations.service';
 
-type BillingResultPayload = BillingAccountCreatedPayload | BillingFailedPayload;
+type BillingResultPayload =
+  | BillingAccountCreatedPayload
+  | BillingFailedPayload
+  | BillingAccountCancelledPayload;
 type ProvisioningResultPayload =
   | ProvisioningCompletedPayload
   | ProvisioningFailedPayload;

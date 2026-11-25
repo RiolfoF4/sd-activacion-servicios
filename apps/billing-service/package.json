@@ -1,7 +1,7 @@
 {
   "name": "@poc/billing-service",
   "version": "0.0.1",
-  "description": "Consume ActivationRequested y crea la cuenta de facturación simulada",
+  "description": "Consume ActivationRequested y activation.events; crea y cancela la cuenta de facturación simulada",
   "author": "",
   "private": true,
   "license": "UNLICENSED",

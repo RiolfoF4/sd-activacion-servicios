@@ -9,6 +9,7 @@ import {
   type ActivationCompletedPayload,
   type ActivationFailedPayload,
   type ActivationRequestedPayload,
+  type BillingAccountCancelledPayload,
   type BillingAccountCreatedPayload,
   type BillingFailedPayload,
   type Envelope,
@@ -19,7 +20,10 @@ import { Activation, ActivationDocument } from './activations.schema';
 import { CreateActivationDto } from './dto/create-activation.dto';
 import { KAFKA_CLIENT } from './kafka/kafka-producer.module';
 
-type BillingResultPayload = BillingAccountCreatedPayload | BillingFailedPayload;
+type BillingResultPayload =
+  | BillingAccountCreatedPayload
+  | BillingFailedPayload
+  | BillingAccountCancelledPayload;
 type ProvisioningResultPayload =
   | ProvisioningCompletedPayload
   | ProvisioningFailedPayload;
@@ -110,6 +114,13 @@ export class ActivationsService {
       return;
     }
 
+    if (envelope.eventType === 'BillingAccountCancelled') {
+      // La compensación no cambia el estado de la activación: solo se
+      // registra en el historial para que la timeline muestre la anulación.
+      await this.recordHistoryOnly(envelope);
+      return;
+    }
+
     this.logger.warn(
       `Evento de billing ignorado (activación=${envelope.correlationId}, eventType=${envelope.eventType})`,
     );
@@ -166,7 +177,7 @@ export class ActivationsService {
     );
 
     if (!updatedActivation) {
-      await this.recordIgnoredResult(envelope);
+      await this.recordHistoryOnly(envelope);
       return;
     }
 
@@ -186,7 +197,7 @@ export class ActivationsService {
     await this.completeActivationIfReady(updatedActivation._id);
   }
 
-  private async recordIgnoredResult(
+  private async recordHistoryOnly(
     envelope: Envelope<unknown>,
   ): Promise<void> {
     const result = await this.activationModel.updateOne(
@@ -209,7 +220,7 @@ export class ActivationsService {
     }
 
     this.logger.log(
-      `Evento ${envelope.eventType} registrado solo en el historial (activación=${envelope.correlationId}, estado final)`,
+      `Evento ${envelope.eventType} registrado solo en el historial (activación=${envelope.correlationId})`,
     );
   }
 

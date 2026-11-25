@@ -25,6 +25,15 @@ export class BillingAccount {
     default: 'CREATED',
   })
   status: BillingAccountStatus;
+
+  // Se completan al compensar una activación fallida. Un documento CANCELLED
+  // puede ser un tombstone: la cuenta nunca llegó a crearse y solo marca que
+  // un ActivationRequested tardío no debe crearla.
+  @Prop()
+  cancelledAt?: Date;
+
+  @Prop()
+  cancellationReason?: string;
 }
 
 export const BillingAccountSchema =
