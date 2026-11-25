@@ -272,6 +272,7 @@ export class ActivationsService {
     );
 
     this.publishActivationResult(failedActivation, 'ActivationFailed', {
+      planId: failedActivation.planId,
       failedService,
       reason,
     });

@@ -7,9 +7,11 @@
 #   kafka-ui             → UI en localhost:8080 para inspeccionar topics
 #   mongo                → replica set de 1 nodo (una base por servicio)
 #   mongo-init           → job que inicializa el replica set hasta tener PRIMARY
+#   mailpit              → bandeja de correo simulada (SMTP 1025, UI 8025)
 #   activation-api       → REST + agregador de la saga (puerto 3000)
 #   billing-service      → consume ActivationRequested y crea la cuenta
 #   provisioning-service → consume ActivationRequested y aprovisiona la línea
+#   notification-service → consume activation.events y manda el email
 #
 # Uso: docker compose up -d --build
 # =============================================================================
@@ -110,7 +112,25 @@ services:
         condition: service_completed_successfully
 
   # ---------------------------------------------------------------------------
-  # 4. MONGO (base de datos en replica set de 1 nodo)
+  # 4. MAILPIT (bandeja de correo simulada)
+  # ---------------------------------------------------------------------------
+  # La spec pide Mailhog, pero está sin mantenimiento desde 2020. Mailpit es un
+  # reemplazo compatible: mismo SMTP en 1025 y misma UI en 8025, con imagen
+  # multi-arquitectura y API estable (/api/v1/messages) para el smoke.
+  # La imagen ya trae su propio HEALTHCHECK (/mailpit readyz).
+  # ---------------------------------------------------------------------------
+  mailpit:
+    image: axllent/mailpit:v1.34.0
+    container_name: mailpit
+    ports:
+      - "1025:1025"                  # SMTP: acá se conecta notification-service
+      - "8025:8025"                  # UI web: la "bandeja de entrada" de la demo
+    environment:
+      MP_MAX_MESSAGES: 5000          # sin volume: `docker compose down` limpia todo
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # 5. MONGO (base de datos en replica set de 1 nodo)
   # ---------------------------------------------------------------------------
   # ¿Por qué un replica set si hay un solo nodo? Porque Mongo NO permite
   # transacciones multi-documento en modo standalone, y la POC las necesita
@@ -138,7 +158,7 @@ services:
       start_period: 15s
 
   # ---------------------------------------------------------------------------
-  # 5. MONGO-INIT (inicializa el replica set, una sola vez)
+  # 6. MONGO-INIT (inicializa el replica set, una sola vez)
   # ---------------------------------------------------------------------------
   # Patrón "job": entra, hace rs.initiate(), espera a que el nodo se elija
   # PRIMARY y termina. Idempotente: si ya está inicializado, no hace nada.
@@ -153,9 +173,9 @@ services:
     restart: "no"                     # es un job: termina y no vuelve a correr
 
   # ---------------------------------------------------------------------------
-  # 6. SERVICIOS NESTJS (Fase 1)
+  # 7. SERVICIOS NESTJS
   # ---------------------------------------------------------------------------
-  # Los tres se construyen con el mismo Dockerfile y se diferencian por APP.
+  # Todos se construyen con el mismo Dockerfile y se diferencian por APP.
   # No tienen container_name a propósito: así el escenario 4 de Fase 3 puede
   # hacer `docker compose up -d --scale billing-service=2`.
   #
@@ -232,5 +252,33 @@ services:
         condition: service_healthy
       mongo-init:
         condition: service_completed_successfully
+    init: true
+    restart: unless-stopped
+
+  notification-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP: notification-service
+    environment:
+      KAFKA_BROKERS: kafka:19092
+      KAFKA_CLIENT_ID: notification-svc
+      KAFKA_GROUP_ID: notification-svc
+      MONGO_URI: "mongodb://mongo:27017/notification?replicaSet=rs0&directConnection=true"
+      SMTP_HOST: mailpit
+      SMTP_PORT: 1025
+      SMTP_FROM: no-reply@demo.local
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      mongo:
+        condition: service_healthy
+      mongo-init:
+        condition: service_completed_successfully
+      mailpit:
+        condition: service_healthy
     init: true
     restart: unless-stopped

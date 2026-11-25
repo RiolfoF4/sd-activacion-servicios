@@ -27,6 +27,7 @@ export type ActivationCompletedPayload = {
 };
 
 export type ActivationFailedPayload = {
+  planId: string;
   failedService: "billing" | "provisioning";
   reason: string;
 };

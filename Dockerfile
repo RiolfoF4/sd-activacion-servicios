@@ -33,14 +33,15 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/activation-api/package.json ./apps/activation-api/
 COPY apps/billing-service/package.json ./apps/billing-service/
 COPY apps/provisioning-service/package.json ./apps/provisioning-service/
+COPY apps/notification-service/package.json ./apps/notification-service/
 COPY libs/contracts/package.json ./libs/contracts/
 
 RUN pnpm install --frozen-lockfile
 
 # El build arg se declara después del install para que la capa de dependencias
-# sea compartida por las tres imágenes.
+# sea compartida por todas las imágenes.
 ARG APP
-RUN test -n "$APP" || (echo "Falta el build arg APP (activation-api | billing-service | provisioning-service)" >&2; exit 1)
+RUN test -n "$APP" || (echo "Falta el build arg APP (activation-api | billing-service | provisioning-service | notification-service)" >&2; exit 1)
 
 COPY apps ./apps
 COPY libs ./libs
