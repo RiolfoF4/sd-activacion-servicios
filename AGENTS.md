@@ -10,6 +10,7 @@
 - **Keep steps small and verify each one.** Use `pnpm smoke` for end-to-end behavior, or a concrete request/command for the changed piece. State what passed and what remains unverified.
 - **No broad refactors or out-of-scope edits without asking.** If another file must change, explain why and get approval first.
 - **For design decisions, present 2–3 options with trade-offs and a recommendation**, then let the owner choose before implementing.
+- **The owner makes commits.** Never stage, commit, or push. At most propose the files to add and a commit message for the owner to review and run.
 - Explain in Spanish (English technical terms are fine). The goal is that the owner learns Kafka, NestJS, Mongo, and Docker from the work.
 
 ## Commands (from repo root)
@@ -47,7 +48,7 @@ pnpm --filter @poc/contracts check            # tsc --noEmit
 - Keep `docker/*.sh` LF (`.gitattributes` enforces it); CRLF makes bash fail with `^M: command not found`.
 - Cold-start Kafka may log `not the correct coordinator`; consumers retry and the smoke timeout covers it.
 - Don't run a local `start:dev` instance alongside its Compose instance: they share `KAFKA_GROUP_ID` and Kafka splits partitions.
-- Code comments and docs are Spanish; keep new comments Spanish. Commits follow Conventional Commits with app/lib scopes (`feat(activation-api): ...`).
+- Code comments and docs are Spanish; keep new comments Spanish. When suggesting a commit, use Conventional Commits with app/lib scopes (`feat(activation-api): ...`).
 
 ## Debugging
 - Logs: `docker compose logs -f activation-api billing-service provisioning-service`. Kafka UI: <http://localhost:8080>.
