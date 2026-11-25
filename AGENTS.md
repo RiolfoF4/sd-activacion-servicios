@@ -1,8 +1,9 @@
 # AGENTS.md
 
 ## What this repo is
-- **Phase 1 only** of the POC spec in `docs/TP8_POC_Activacion_de_Servicios_con_Kafka.md`: `activation-api`, `billing-service`, `provisioning-service`, shared `libs/contracts`, and Docker Compose infra.
-- The doc also designs later phases (React UI, notification, crm-analytics, `libs/kafka-toolkit`, compensation, retries/DLQ, outbox). Those do not exist yet; don't create stand-ins unless asked, and treat code/config as truth over the doc.
+- **Current code is Phase 1 only** of the POC spec in `docs/TP8_POC_Activacion_de_Servicios_con_Kafka.md`: `activation-api`, `billing-service`, `provisioning-service`, shared `libs/contracts`, and Docker Compose infra.
+- **Phase 2 is planned, not started**, in `docs/plan-fase-2.md` (notification + Mailhog → compensation → WebSocket → React UI → packaging). Before starting an increment, read its section; implement increments in order, one per session, and update the plan's Status/Handoff and this file after each verified increment.
+- Later phases (crm-analytics, `libs/kafka-toolkit`, retries/DLQ, outbox) exist only in the spec. Do not create stand-ins unless asked; treat code/config as truth for what exists and `plan-fase-2.md` as the approved next scope.
 - `apps/activation-api/README.md` is stock Nest boilerplate. There is no root README.
 
 ## Working agreement (owner is learning the stack)
@@ -26,7 +27,7 @@ pnpm --filter @poc/contracts check            # tsc --noEmit
 ```
 
 - Full stack: `docker compose up -d --build`; `docker compose ps` should show kafka/mongo `healthy`, kafka-init/mongo-init `exited (0)`, and the three apps `running`.
-- `pnpm smoke` is the de facto acceptance test and requires the stack up. It checks `202` + `PENDING` -> `ACTIVE`, both steps `OK`, and history ending in `ActivationCompleted`. Env overrides: `API_URL`, `SMOKE_TIMEOUT_MS`.
+- `pnpm smoke` is the de facto acceptance test and requires the stack up. It checks `202` + `PENDING` -> `ACTIVE`, both steps `OK`, and history ending in `ActivationCompleted`. It currently covers only the Phase 1 happy path; failure, compensation, and notification checks are planned for Phase 2 increment 5. Env overrides: `API_URL`, `SMOKE_TIMEOUT_MS`.
 - **No unit or e2e specs exist** despite the Jest scripts; `pnpm --filter @poc/activation-api test` exits 1 with "No tests found". Verify with `pnpm smoke` or a manual POST/GET. No CI or pre-commit config.
 - Local dev: copy each app's `.env.example` to `.env` (gitignored), start only infra with `docker compose up -d kafka kafka-init mongo mongo-init kafka-ui`, then `pnpm --filter @poc/activation-api start:dev` (same for billing/provisioning).
 - `docker compose down` wipes all Kafka/Mongo state (no named volumes) — use it to reset a stale demo.
