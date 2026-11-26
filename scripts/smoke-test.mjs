@@ -129,7 +129,7 @@ if (historyTypes.at(-1) !== "ActivationCompleted") {
 console.log(
   JSON.stringify(
     {
-      activationId: activation._id,
+      activationId: activation.activationId,
       status: activation.status,
       steps: activation.steps,
       history: historyTypes,

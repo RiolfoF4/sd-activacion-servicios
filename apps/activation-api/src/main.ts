@@ -5,6 +5,7 @@ import type { MicroserviceOptions } from '@nestjs/microservices';
 import { Transport } from '@nestjs/microservices';
 import { TOPICS } from '@poc/contracts';
 import { AppModule } from './app.module';
+import { CORS_ORIGINS } from './config/cors';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -30,6 +31,12 @@ async function bootstrap() {
   });
 
   app.enableShutdownHooks();
+
+  // CORS de HTTP. Es una configuración distinta a la del gateway de
+  // Socket.IO: el navegador valida por separado las llamadas a la API y el
+  // handshake del WebSocket.
+  app.enableCors({ origin: CORS_ORIGINS });
+
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
@@ -44,7 +51,7 @@ async function bootstrap() {
   await app.listen(port);
 
   Logger.log(
-    `activation-api escuchando HTTP en :${port} y Kafka como "${groupId}" (${TOPICS.billingEvents}, ${TOPICS.provisioningEvents})`,
+    `activation-api escuchando HTTP y WebSocket (socket.io) en :${port} y Kafka como "${groupId}" (${TOPICS.billingEvents}, ${TOPICS.provisioningEvents})`,
     'Bootstrap',
   );
 }

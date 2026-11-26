@@ -16,6 +16,7 @@ import {
   type ProvisioningCompletedPayload,
   type ProvisioningFailedPayload,
 } from '@poc/contracts';
+import { ActivationsPublisher } from './activations.publisher';
 import { Activation, ActivationDocument } from './activations.schema';
 import { CreateActivationDto } from './dto/create-activation.dto';
 import { KAFKA_CLIENT } from './kafka/kafka-producer.module';
@@ -25,11 +26,9 @@ type BillingResultPayload =
   | BillingFailedPayload
   | BillingAccountCancelledPayload;
 type ProvisioningResultPayload =
-  | ProvisioningCompletedPayload
-  | ProvisioningFailedPayload;
+  ProvisioningCompletedPayload | ProvisioningFailedPayload;
 type ActivationResultPayload =
-  | ActivationCompletedPayload
-  | ActivationFailedPayload;
+  ActivationCompletedPayload | ActivationFailedPayload;
 
 @Injectable()
 export class ActivationsService {
@@ -40,6 +39,8 @@ export class ActivationsService {
 
     @Inject(KAFKA_CLIENT)
     private readonly client: ClientKafka,
+
+    private readonly publisher: ActivationsPublisher,
   ) {}
 
   private newActivationId(): string {
@@ -94,6 +95,9 @@ export class ActivationsService {
     this.logger.log(
       `Activación ${savedActivation._id} creada (cliente=${customerId}, plan=${planId}, fallo=${savedActivation.simulateFailure})`,
     );
+
+    // Primer snapshot: la UI ya puede mostrar la activación en PENDING.
+    this.publisher.publishSnapshot(savedActivation);
 
     this.publish(TOPICS.activationRequested, requestedEvent);
 
@@ -185,6 +189,9 @@ export class ActivationsService {
       `Resultado de ${service} registrado: ${status} (activación=${envelope.correlationId}, eventType=${envelope.eventType})`,
     );
 
+    // Snapshot con el paso ya registrado (status IN_PROGRESS).
+    this.publisher.publishSnapshot(updatedActivation);
+
     if (status === 'FAILED') {
       await this.failActivation(
         updatedActivation._id,
@@ -197,10 +204,10 @@ export class ActivationsService {
     await this.completeActivationIfReady(updatedActivation._id);
   }
 
-  private async recordHistoryOnly(
-    envelope: Envelope<unknown>,
-  ): Promise<void> {
-    const result = await this.activationModel.updateOne(
+  private async recordHistoryOnly(envelope: Envelope<unknown>): Promise<void> {
+    // findOneAndUpdate (y no updateOne) para poder devolver el documento ya
+    // actualizado y emitir el snapshot con el historial nuevo.
+    const updatedActivation = await this.activationModel.findOneAndUpdate(
       { _id: envelope.correlationId },
       {
         $push: {
@@ -210,9 +217,10 @@ export class ActivationsService {
           },
         },
       },
+      { returnDocument: 'after' },
     );
 
-    if (result.matchedCount === 0) {
+    if (!updatedActivation) {
       this.logger.warn(
         `Evento ${envelope.eventType} ignorado: no existe la activación ${envelope.correlationId}`,
       );
@@ -222,6 +230,11 @@ export class ActivationsService {
     this.logger.log(
       `Evento ${envelope.eventType} registrado solo en el historial (activación=${envelope.correlationId})`,
     );
+
+    // El status no cambia (por ejemplo, una compensación o un evento tardío),
+    // pero el historial sí: hay que avisar igual para que la timeline muestre
+    // la anulación.
+    this.publisher.publishSnapshot(updatedActivation);
   }
 
   private async completeActivationIfReady(activationId: string): Promise<void> {
@@ -250,6 +263,8 @@ export class ActivationsService {
     this.logger.log(
       `Activación ${completedActivation._id} -> ACTIVE (billing y provisioning OK)`,
     );
+
+    this.publisher.publishSnapshot(completedActivation);
 
     this.publishActivationResult(completedActivation, 'ActivationCompleted', {
       planId: completedActivation.planId,
@@ -281,6 +296,8 @@ export class ActivationsService {
     this.logger.warn(
       `Activación ${failedActivation._id} -> FAILED (falló ${failedService}: ${reason})`,
     );
+
+    this.publisher.publishSnapshot(failedActivation);
 
     this.publishActivationResult(failedActivation, 'ActivationFailed', {
       planId: failedActivation.planId,

@@ -11,6 +11,10 @@
   "packageManager": "pnpm@12.11.2",
   "private": true,
   "scripts": {
-    "smoke": "node scripts/smoke-test.mjs"
+    "smoke": "node scripts/smoke-test.mjs",
+    "ws:probe": "node scripts/ws-probe.mjs"
+  },
+  "devDependencies": {
+    "socket.io-client": "^4.8.4"
   }
 }

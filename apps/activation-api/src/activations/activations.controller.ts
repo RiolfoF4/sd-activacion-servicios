@@ -7,6 +7,7 @@ import {
   Param,
   Post,
 } from '@nestjs/common';
+import { toActivationSnapshot } from './activations.snapshot';
 import { CreateActivationDto } from './dto/create-activation.dto';
 import { ActivationsService } from './activations.service';
 
@@ -22,10 +23,13 @@ export class ActivationsController {
     return { activationId, status };
   }
 
+  // Devuelve exactamente el mismo snapshot que emite el WebSocket, así la UI
+  // trabaja con una sola forma y el GET sigue siendo la fuente de verdad
+  // (estado inicial y recuperación después de una reconexión).
   @Get(':id')
   async findById(@Param('id') id: string) {
     const activation = await this.activationsService.findById(id);
     if (!activation) throw new NotFoundException(`Activation ${id} not found`);
-    return activation;
+    return toActivationSnapshot(activation);
   }
 }
